@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Secure RAG Chat</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --accent: #4f46e5;
+      --accent-2: #7c3aed;
+      --user-msg: #312e81;
+    }
+    body {
+      margin: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 20% 0%, #dbeafe 0%, transparent 35%),
+        radial-gradient(circle at 80% 0%, #ede9fe 0%, transparent 35%),
+        var(--bg);
+      color: var(--text);
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: 100vh;
+      gap: 14px;
+      padding: 14px;
+      box-sizing: border-box;
+    }
+    .sidebar {
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      backdrop-filter: blur(6px);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 6px 24px rgba(15, 23, 42, 0.06);
+    }
+    .main {
+      display: flex;
+      flex-direction: column;
+      max-height: 100vh;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 6px 24px rgba(15, 23, 42, 0.06);
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      backdrop-filter: blur(6px);
+    }
+    .header {
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      padding: 18px 20px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    .chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: linear-gradient(180deg, var(--surface-soft) 0%, var(--surface) 100%);
+    }
+    .msg {
+      border-radius: 14px;
+      padding: 12px 14px;
+      max-width: 90%;
+      white-space: pre-wrap;
+      line-height: 1.45;
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, var(--user-msg), var(--accent-2));
+      color: #ffffff;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+    .composer {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      padding: 12px 14px;
+      display: grid;
+      grid-template-columns: 1fr 120px;
+      gap: 10px;
+    }
+    input, textarea, button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+      font: inherit;
+    }
+    textarea {
+      resize: vertical;
+      min-height: 60px;
+      outline: none;
+    }
+    button {
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+      border: none;
+      font-weight: 600;
+      transition: transform 0.08s ease, filter 0.2s ease;
+    }
+    button:hover { filter: brightness(1.05); }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: 0.65; cursor: not-allowed; }
+    .muted { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .panel { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+    .panel h3 { margin: 0 0 8px 0; font-size: 14px; }
+    .output {
+      font-size: 12px;
+      background: var(--surface-soft);
+      border-radius: 8px;
+      padding: 8px;
+      margin-top: 8px;
+      max-height: 160px;
+      overflow: auto;
+      white-space: pre-wrap;
+      border: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="panel">
+        <h3>Quick PDF Upload</h3>
+        <input id="pdfFiles" type="file" accept="application/pdf" multiple />
+        <input id="trustLevel" type="number" min="1" max="5" value="4" />
+        <button id="uploadBtn">Upload PDFs</button>
+        <div class="output" id="ingestOut"></div>
+      </div>
+
+      <div class="muted" id="syncStatus"></div>
+
+    </aside>
+
+    <main class="main">
+      <div class="header">Secure RAG Chat</div>
+      <div class="chat" id="chatWindow">
+        <div class="msg assistant">Ask your question directly. The app auto-syncs `knowledge_base` in the background.</div>
+      </div>
+      <div class="composer">
+        <textarea id="query" placeholder="Ask about your local knowledge files..."></textarea>
+        <button id="askBtn">Send</button>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const DEFAULT_SESSION_ID = "ui-session";
+    const DEFAULT_TOP_K = 8;
+    const ingestOut = document.getElementById("ingestOut");
+    const syncStatus = document.getElementById("syncStatus");
+    const chatWindow = document.getElementById("chatWindow");
+    const uploadBtn = document.getElementById("uploadBtn");
+    const askBtn = document.getElementById("askBtn");
+    let syncPromise;
+
+    async function safeJson(res) {
+      const text = await res.text();
+      if (!text) return {};
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { raw: text };
+      }
+    }
+
+    function addMessage(role, text) {
+      const box = document.createElement("div");
+      box.className = `msg ${role}`;
+      box.textContent = text;
+      chatWindow.appendChild(box);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    async function ensureSynced() {
+      if (syncPromise) return syncPromise;
+      syncStatus.textContent = "Auto-syncing `knowledge_base`...";
+      syncPromise = fetch("/ingest/sync", { method: "POST" })
+        .then(async (res) => {
+          const payload = await safeJson(res);
+          if (!res.ok) {
+            throw new Error(payload?.detail || payload?.error || `Sync failed with status ${res.status}`);
+          }
+          syncStatus.textContent = "Knowledge base ready.";
+        })
+        .catch((err) => {
+          syncStatus.textContent = `Auto-sync failed: ${String(err)}. You can still upload PDFs above.`;
+        });
+      return syncPromise;
+    }
+
+    uploadBtn.addEventListener("click", async () => {
+      const files = document.getElementById("pdfFiles").files;
+      const trustLevel = document.getElementById("trustLevel").value || "4";
+      if (!files.length) {
+        ingestOut.textContent = "Choose one or more PDF files first.";
+        return;
+      }
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = "Uploading...";
+      ingestOut.textContent = "Uploading and processing PDFs...";
+      const form = new FormData();
+      for (const file of files) form.append("files", file);
+      form.append("trust_level", trustLevel);
+      try {
+        const res = await fetch("/ingest/pdf", { method: "POST", body: form });
+        const payload = await safeJson(res);
+        if (!res.ok) {
+          ingestOut.textContent = JSON.stringify({ error: "Ingestion failed", status: res.status, payload }, null, 2);
+        } else {
+          ingestOut.textContent = JSON.stringify(payload, null, 2);
+        }
+      } catch (err) {
+        ingestOut.textContent = JSON.stringify(
+          { error: "Network error during ingestion", details: String(err) },
+          null,
+          2
+        );
+      } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = "Upload and Ingest";
+      }
+    });
+
+    askBtn.addEventListener("click", async () => {
+      const query = document.getElementById("query").value;
+      if (!query.trim()) {
+        addMessage("assistant", "Type a question first.");
+        return;
+      }
+      addMessage("user", query);
+      askBtn.disabled = true;
+      askBtn.textContent = "...";
+      try {
+        await ensureSynced();
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: DEFAULT_SESSION_ID, query, top_k: DEFAULT_TOP_K })
+        });
+        const payload = await safeJson(res);
+        if (!res.ok) {
+          addMessage("assistant", JSON.stringify({ error: "Chat failed", status: res.status, payload }, null, 2));
+        } else {
+          let answer = payload.answer || "(no answer)";
+          if (payload.citations && payload.citations.length) {
+            const cite = payload.citations.map(c => `${c.title} [${c.chunk_id}]`).join("\n");
+            answer += `\n\nSources:\n${cite}`;
+          }
+          addMessage("assistant", answer);
+        }
+      } catch (err) {
+        addMessage("assistant", `Network error: ${String(err)}`);
+      } finally {
+        askBtn.disabled = false;
+        askBtn.textContent = "Send";
+      }
+    });
+
+    ensureSynced();
+  </script>
+</body>
+</html>
+

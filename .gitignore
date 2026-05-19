@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# Environment secrets
+.env
+
+# OS files
+.DS_Store
+
+# IDE
+.vscode/
+.cursor/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# RAG / ML artifacts
+*.faiss
+*.pkl
+*.bin
+*.sqlite

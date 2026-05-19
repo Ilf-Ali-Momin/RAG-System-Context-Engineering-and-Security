@@ -1,0 +1,143 @@
+Metadata-Version: 2.4
+Name: secure-context-rag
+Version: 0.1.0
+Summary: Secure context-engineered RAG chatbot MVP
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn>=0.30.0
+Requires-Dist: pydantic>=2.8.0
+Requires-Dist: pydantic-settings>=2.3.0
+Requires-Dist: numpy>=1.26.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: pypdf>=5.0.0
+Requires-Dist: python-docx>=1.1.0
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: pytest>=8.2.0
+
+# Secure Context-Engineered RAG MVP
+
+Python FastAPI Retrieval-Augmented Generation chatbot focused on context engineering and security.
+
+## What it does
+
+- Ingests external documents and chunks them into retrievable units.
+- Supports folder-based ingestion from `knowledge_base` (recursive).
+- Retrieves relevant chunks for a query and filters them by quality and safety.
+- Builds a structured context pack with dynamic size limits.
+- Answers only from retrieved context or refuses when context is not reliable.
+- Detects common prompt injection patterns in user input and retrieved content.
+- Redacts potential sensitive values before generation.
+- Includes source attribution in successful answers.
+
+## Architecture
+
+- `app/api/ingest.py`: JSON ingestion, multi-PDF upload (`/ingest/pdf`), and folder sync (`/ingest/sync`).
+- `app/api/chat.py`: secure chat flow and refusal logic.
+- `app/ingestion/*`: normalization, chunking, PDF/doc/video-aware local file loading.
+- `app/retrieval/*`: embeddings, vector store, retrieval.
+- `app/context/*`: quality scoring, dedupe, structured context packing.
+- `app/security/*`: sanitization, injection detection, policy checks.
+- `app/memory/*`: short-term verified conversation memory.
+- `app/generation/*`: context-only prompting and groundedness checks.
+- `app/utils/citations.py`: citations for source attribution.
+
+## Run locally
+
+1. Create environment and install:
+   - `python -m venv .venv`
+   - `source .venv/bin/activate`
+   - `pip install -e .`
+2. Install and start Ollama:
+   - Install Ollama from [https://ollama.com](https://ollama.com)
+   - Pull models:
+     - `ollama pull llama3.1:8b`
+     - `ollama pull nomic-embed-text`
+   - Start Ollama if not already running:
+     - `ollama serve`
+3. (Optional) Set model config:
+   - `export RAG_OLLAMA_CHAT_MODEL=llama3.1:8b`
+   - `export RAG_OLLAMA_EMBEDDING_MODEL=nomic-embed-text`
+   - `export RAG_OLLAMA_BASE_URL=http://localhost:11434`
+4. Start service:
+   - `uvicorn app.main:app --reload`
+5. Health:
+   - `GET /health`
+6. Open UI:
+   - `http://127.0.0.1:8000/ui`
+
+## API examples
+
+### Ingest
+
+`POST /ingest`
+
+```json
+{
+  "documents": [
+    {
+      "source_id": "doc-1",
+      "title": "Context Engineering Guide",
+      "content": "Context engineering is the process of selecting relevant and trusted information...",
+      "trust_level": 5,
+      "metadata": {"category": "security"}
+    }
+  ]
+}
+```
+
+### Ingest PDFs (multi-file)
+
+`POST /ingest/pdf` (`multipart/form-data`)
+
+- form field `files`: one or more PDF files
+- form field `trust_level`: integer 1..5 (optional, default 4)
+
+### Sync local knowledge folder
+
+`POST /ingest/sync`
+
+- Reads files recursively from `knowledge_base` (or `RAG_KNOWLEDGE_BASE_DIR`)
+- Supported:
+  - PDF: `.pdf`
+  - Docs/Text: `.txt`, `.md`, `.markdown`, `.rst`, `.docx`
+  - Videos: `.mp4`, `.mov`, `.mkv`, `.avi`, `.webm`
+- For videos, add sidecar transcript files for better retrieval:
+  - `video.mp4` + `video.txt` or `video.md`
+
+### Chat
+
+`POST /chat`
+
+```json
+{
+  "session_id": "session-001",
+  "query": "How should context be filtered before generation?",
+  "top_k": 8
+}
+```
+
+## Security model summary
+
+- User input and retrieved chunks are sanitized before use.
+- Prompt-injection indicators trigger safe refusal.
+- Requests for hidden/system/internal instructions are always refused.
+- Retrieved chunks with security flags are excluded from context.
+- Sensitive token-like strings are redacted before prompt assembly.
+- Responses are blocked if groundedness or context-confidence checks fail.
+- Generation and embeddings are local-first via Ollama (no paid hosted model required).
+
+## Testing
+
+- Run all tests: `pytest`
+- Security/adversarial tests: `tests/test_security.py`, `tests/test_refusal_logic.py`
+- Context engineering tests: `tests/test_context_engineering.py`
+
+## Quick UI flow
+
+1. Start API with `./run.sh`.
+2. Open `http://127.0.0.1:8000/ui`.
+3. Put your files into `knowledge_base/`.
+4. Click **Sync `knowledge_base`** in the sidebar.
+5. Ask questions in chat; responses include citations or safe refusals.
+
