@@ -123,4 +123,5 @@ Python FastAPI Retrieval-Augmented Generation chatbot focused on context enginee
 3. Put your files into `knowledge_base/`.
 4. Click **Sync `knowledge_base`** in the sidebar.
 5. Ask questions in chat; responses include citations or safe refusals.
-
+<img width="3840" height="2168" alt="Screenshot 2026-05-20 at 20 21 26" src="https://github.com/user-attachments/assets/3507871f-dc00-4161-a1bb-ad9d9507819d" />
+<img width="3840" height="2164" alt="Screenshot 2026-05-20 at 20 21 18" src="https://github.com/user-attachments/assets/3d4616fb-61c8-417c-a4da-5d8dfb9e2e3c" />
